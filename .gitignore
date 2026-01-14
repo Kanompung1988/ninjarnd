@@ -1,0 +1,45 @@
+# Vercel
+.vercel
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv/
+venv/
+env/
+ENV/
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Environment
+.env
+.env.local
+
+# User data (local only)
+user_data/test*/
+user_data/default_at_user_com/
+
+# Exports (local only)
+exports/presentations/images/
+
+# Node
+frontend/node_modules/
+frontend/.next/
+.env
+.env.local
+.env*.local

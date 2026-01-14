@@ -1,0 +1,118 @@
+# =============================================
+# NINJA Research System - Docker Compose
+# =============================================
+# Full stack: Backend (FastAPI) + Frontend (Next.js)
+#
+# Usage:
+#   Development:  docker-compose up --build
+#   Production:   docker-compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   Stop:         docker-compose down
+#   Logs:         docker-compose logs -f
+#   Rebuild:      docker-compose up --build --force-recreate
+
+services:
+  # =============================================
+  # Backend - Python FastAPI
+  # =============================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: ninja-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # Application
+      - APP_NAME=NINJA API
+      - APP_VERSION=2.0
+      - ENVIRONMENT=development
+      - DEBUG=True
+      - HOST=0.0.0.0
+      - PORT=8000
+      
+      # AI API Keys (set in .env file)
+      - TAVILY_API_KEY=${TAVILY_API_KEY}
+      - TYPHOON_API_KEY=${TYPHOON_API_KEY}
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - SERPER_API_KEY=${SERPER_API_KEY}
+      - JINA_API_KEY=${JINA_API_KEY}
+      
+      # Azure OpenAI
+      - AZURE_OPENAI_API_KEY=${AZURE_OPENAI_API_KEY}
+      - AZURE_OPENAI_ENDPOINT=${AZURE_OPENAI_ENDPOINT}
+      
+      # Azure Storage (optional)
+      - AZURE_STORAGE_CONNECTION_STRING=${AZURE_STORAGE_CONNECTION_STRING:-}
+      
+      # HuggingFace (optional)
+      - HF_TOKEN=${HF_TOKEN:-}
+      
+    volumes:
+      # Persist data directories
+      - ./user_data:/app/user_data
+      - ./research_blogs:/app/research_blogs
+      - ./presentations:/app/presentations
+      - ./exports:/app/exports
+      - ./logs:/app/logs
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+    networks:
+      - ninja-network
+
+  # =============================================
+  # Frontend - Next.js
+  # =============================================
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - NEXT_PUBLIC_API_URL=http://backend:8000
+        - NEXT_PUBLIC_BACKEND_URL=http://backend:8000
+        - NEXTAUTH_URL=http://localhost:3000
+    container_name: ninja-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
+      - NEXT_PUBLIC_BACKEND_URL=http://localhost:8000
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - ninja-network
+
+# =============================================
+# Networks
+# =============================================
+networks:
+  ninja-network:
+    driver: bridge
+
+# =============================================
+# Volumes (optional - for persistent data)
+# =============================================
+volumes:
+  user_data:
+  research_blogs:
+  presentations:
+  exports:
+  logs:
