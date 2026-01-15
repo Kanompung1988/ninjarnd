@@ -47,7 +47,7 @@ AZURE_OPENAI_API_KEY = os.getenv("AZURE_OPENAI_API_KEY")
 AZURE_OPENAI_ENDPOINT = os.getenv("AZURE_OPENAI_ENDPOINT", "https://sakso-m5xao201-swedencentral.cognitiveservices.azure.com")
 
 # CogView-3 Settings (ZhipuAI Image Generation)
-COGVIEW_MODEL = "cogview-3-flash"  # หรือ "cogview-3" สำหรับคุณภาพสูงสุด
+COGVIEW_MODEL = "cogview-3"  # ใช้ cogview-3 แทน cogview-3-flash (model ที่มีอยู่จริง)
 
 # Exports directory
 EXPORTS_DIR = PROJECT_ROOT / "exports" / "presentations"
@@ -149,6 +149,31 @@ Return JSON only:
 }}"""
 
 
+# ═══════════════════════════════════════════════════════════════
+# RATE LIMITER (ป้องกัน API Rate Limit)
+# ═══════════════════════════════════════════════════════════════
+import threading
+
+class RateLimiter:
+    """Simple rate limiter to control API call frequency"""
+    def __init__(self, calls_per_minute: int = 10):
+        self.calls_per_minute = calls_per_minute
+        self.interval = 60.0 / calls_per_minute
+        self.last_call = 0
+        self.lock = threading.Lock()
+    
+    def wait_if_needed(self):
+        """Wait if necessary to respect rate limit"""
+        with self.lock:
+            now = time.time()
+            time_since_last_call = now - self.last_call
+            if time_since_last_call < self.interval:
+                sleep_time = self.interval - time_since_last_call
+                print(f"   ⏳ Rate limit: waiting {sleep_time:.1f}s...")
+                time.sleep(sleep_time)
+            self.last_call = time.time()
+
+
 class GLM7StepGenerator:
     """
     7-Step Slide Generator with GLM-4.7 (ZhipuAI/BigModel) + Azure OpenAI Fallback
@@ -179,6 +204,9 @@ class GLM7StepGenerator:
         self.glm_available = bool(self.glm_api_key)
         self.cogview_available = self.glm_available
         
+        # Rate limiter (5 calls per minute to avoid 429 errors)
+        self.rate_limiter = RateLimiter(calls_per_minute=5)
+        
         # Determine primary model
         if self.glm_available:
             self.primary_model = "GLM-4.7 (ZhipuAI)"
@@ -201,6 +229,10 @@ class GLM7StepGenerator:
     
     def _call_glm(self, messages: List[Dict], max_tokens: int = 4096, temperature: float = 0.7) -> str:
         """Call GLM via ZhipuAI Direct API - supports GLM-4.7 with reasoning mode"""
+        
+        # Apply rate limiting before API call
+        self.rate_limiter.wait_if_needed()
+        
         headers = {
             "Authorization": f"Bearer {self.glm_api_key}",
             "Content-Type": "application/json"
@@ -215,13 +247,18 @@ class GLM7StepGenerator:
             "stream": False
         }
         
-        # Retry logic with exponential backoff
+        # Retry logic with longer exponential backoff for rate limiting
         max_retries = 3
-        retry_delay = 2
+        retry_delay = 5  # เริ่มต้นที่ 5 วินาที
         
         for attempt in range(max_retries):
             try:
                 print(f"   🔄 {self.model} API call (attempt {attempt + 1}/{max_retries})...")
+                
+                # เพิ่ม delay ก่อน request เพื่อหลีกเลี่ยง rate limit
+                if attempt > 0:
+                    print(f"   ⏳ Waiting {retry_delay} seconds before retry...")
+                    time.sleep(retry_delay)
                 
                 response = requests.post(
                     f"{self.base_url}/chat/completions",
@@ -230,14 +267,31 @@ class GLM7StepGenerator:
                     timeout=120
                 )
                 
-                # Check for API errors
+                # Handle rate limiting (429) specifically
+                if response.status_code == 429:
+                    error_data = response.json() if response.text else {}
+                    error_msg = error_data.get("error", {}).get("message", "Rate limit exceeded")
+                    print(f"   ⚠️ Rate Limit (429): {error_msg}")
+                    
+                    if attempt < max_retries - 1:
+                        retry_delay *= 3  # เพิ่ม delay มากขึ้นสำหรับ rate limit
+                        continue
+                    else:
+                        # ถ้า retry หมดแล้วให้ fallback to Azure
+                        print(f"   🔄 GLM rate limited, switching to Azure GPT-4o fallback...")
+                        return self._call_azure_fallback(messages, max_tokens, temperature)
+                
+                # Check for other API errors
                 if response.status_code != 200:
                     error_msg = response.text[:200]
                     print(f"   ❌ API Error {response.status_code}: {error_msg}")
                     if attempt < max_retries - 1:
-                        time.sleep(retry_delay)
                         retry_delay *= 2
                         continue
+                    else:
+                        # Fallback to Azure on persistent errors
+                        print(f"   🔄 GLM failed, switching to Azure GPT-4o fallback...")
+                        return self._call_azure_fallback(messages, max_tokens, temperature)
                     return ""
                 
                 data = response.json()
@@ -304,11 +358,11 @@ class GLM7StepGenerator:
         # Fallback to Azure if GLM fails
         if self.azure_available:
             print(f"   🔄 Falling back to Azure GPT-4o...")
-            return self._call_azure(messages, max_tokens, temperature)
+            return self._call_azure_fallback(messages, max_tokens, temperature)
         
         return ""
     
-    def _call_azure(self, messages: List[Dict], max_tokens: int = 2048, temperature: float = 0.7) -> str:
+    def _call_azure_fallback(self, messages: List[Dict], max_tokens: int = 2048, temperature: float = 0.7) -> str:
         """Call Azure OpenAI GPT-4o as fallback"""
         try:
             headers = {
@@ -479,65 +533,55 @@ class GLM7StepGenerator:
         return None
     
     def _search_image(self, query: str, slide_number: int) -> Optional[Dict]:
-        """Search for relevant images using GLM web_search tool"""
+        """Search for relevant images using Serper API (Google Images)"""
         print(f"   🔍 Searching image for slide {slide_number}...")
+        
+        # ใช้ SERPER_API_KEY สำหรับค้นหารูปภาพ
+        serper_api_key = os.getenv("SERPER_API_KEY")
+        if not serper_api_key:
+            print(f"   ⚠️ SERPER_API_KEY not found, cannot search images")
+            return None
         
         try:
             headers = {
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {self.glm_api_key}"
+                "X-API-KEY": serper_api_key,
+                "Content-Type": "application/json"
             }
             
-            # Use GLM with web_search to find images
+            # Search for images using Serper Google Images API
             payload = {
-                "model": "glm-4-flash",
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": f"Find a professional, high-quality image URL for: {query}. Return ONLY the direct image URL (ending in .jpg, .png, or .webp), no explanation."
-                    }
-                ],
-                "tools": [
-                    {
-                        "type": "web_search",
-                        "web_search": {
-                            "enable": True,
-                            "search_query": f"{query} professional image high quality",
-                            "search_result": True
-                        }
-                    }
-                ],
-                "max_tokens": 500,
-                "temperature": 0.3
+                "q": f"{query} professional presentation high quality",
+                "tbm": "isch",  # Image search
+                "num": 5
             }
             
             response = requests.post(
-                f"{self.base_url}/chat/completions",
+                "https://google.serper.dev/images",
                 headers=headers,
                 json=payload,
-                timeout=30
+                timeout=15
             )
             
             if response.status_code == 200:
                 data = response.json()
-                content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+                images = data.get("images", [])
                 
-                # Extract image URL from response
-                import re
-                url_pattern = r'https?://[^\s<>"]+\.(?:jpg|jpeg|png|gif|webp)'
-                urls = re.findall(url_pattern, content, re.IGNORECASE)
+                if images:
+                    # เลือกรูปแรกที่มีคุณภาพดี
+                    for img in images:
+                        image_url = img.get("imageUrl")
+                        if image_url and any(ext in image_url.lower() for ext in ['.jpg', '.jpeg', '.png', '.webp']):
+                            print(f"   ✅ Found image from Google Images: {image_url[:60]}...")
+                            return {
+                                "url": image_url,
+                                "local_path": None,
+                                "prompt": query[:100],
+                                "model": "serper-image-search",
+                                "source": img.get("source", "Google Images")
+                            }
+            else:
+                print(f"   ⚠️ Serper Image Search error: {response.status_code}")
                 
-                if urls:
-                    image_url = urls[0]
-                    local_path = self._save_image(image_url, slide_number)
-                    print(f"   ✅ Found image for slide {slide_number}")
-                    return {
-                        "url": image_url,
-                        "local_path": str(local_path) if local_path else None,
-                        "prompt": query[:100],
-                        "source": "web_search"
-                    }
-                    
         except Exception as e:
             print(f"   ⚠️ Image search error: {e}")
         
