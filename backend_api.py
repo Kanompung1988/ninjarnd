@@ -1591,9 +1591,10 @@ async def generate_slides_from_blog(
     request: BlogToSlidesRequest,
     api_key: str = Depends(verify_api_key_optional)
 ):
-    """Generate presentation slides from research blog content"""
+    """Generate presentation slides from research blog content using GLM to summarize chat context first"""
     try:
         print(f"📊 Generating slides from blog: {blog_id}")
+        print(f"👤 User: {request.user_id}")
         
         # Load blog content
         user_blog_dir = get_user_folder(request.user_id, "research_blogs")
@@ -1615,10 +1616,107 @@ async def generate_slides_from_blog(
         recommendations = blog_data.get('recommendations', [])
         sources = blog_data.get('sources', [])
         markdown_report = blog_data.get('markdown_report', '')
+        chat_id = blog_data.get('chat_id', '')
         
-        # Build research context for slide generation
+        # ═══════════════════════════════════════════════════════════════
+        # 🔥 NEW: สรุปเนื้อหาจาก Chat Session ด้วย GLM ก่อน
+        # ═══════════════════════════════════════════════════════════════
+        chat_summary = ""
+        important_links = []
+        key_terms = []
+        
+        if chat_id:
+            print(f"💬 Loading chat session: {chat_id}")
+            try:
+                # Load chat history from database or file
+                from database.memory_db import MemoryDB
+                db = MemoryDB()
+                
+                # Get chat messages
+                messages = db.get_messages(chat_id)
+                
+                if messages:
+                    # Build chat context
+                    chat_context = ""
+                    for msg in messages[-20:]:  # Last 20 messages
+                        role = msg.get('role', 'user')
+                        content = msg.get('content', '')
+                        chat_context += f"\n{role.upper()}: {content[:500]}\n"
+                    
+                    # Use GLM to summarize chat + extract important info
+                    print(f"🤖 Using GLM to summarize chat context...")
+                    from GLM_core import GLMCore
+                    
+                    glm = GLMCore()
+                    summary_prompt = f"""Analyze this chat conversation and research data to create a comprehensive summary for a presentation.
+
+CHAT CONVERSATION:
+{chat_context}
+
+RESEARCH DATA:
+Topic: {query}
+Summary: {executive_summary}
+Findings: {', '.join(key_findings[:5])}
+
+Your task:
+1. **Summarize the main discussion points** from the chat
+2. **Extract ALL important links/URLs** mentioned (preserve exact URLs)
+3. **Identify key terms and technical concepts** that MUST be included in slides
+4. **Highlight critical statistics or data** from research
+
+Return JSON format:
+{{
+  "chat_summary": "3-4 sentence summary of the conversation",
+  "important_links": ["url1", "url2", ...],
+  "key_terms": ["term1", "term2", ...],
+  "critical_points": ["point1", "point2", ...],
+  "data_highlights": ["stat1", "stat2", ...]
+}}"""
+                    
+                    response = glm.chat(
+                        messages=[{"role": "user", "content": summary_prompt}],
+                        temperature=0.3,
+                        max_tokens=2000
+                    )
+                    
+                    # Parse GLM response
+                    import re
+                    content = response.get('content', '')
+                    
+                    # Extract JSON from response
+                    json_match = re.search(r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}', content, re.DOTALL)
+                    if json_match:
+                        summary_data = json.loads(json_match.group(0))
+                        chat_summary = summary_data.get('chat_summary', '')
+                        important_links = summary_data.get('important_links', [])
+                        key_terms = summary_data.get('key_terms', [])
+                        critical_points = summary_data.get('critical_points', [])
+                        data_highlights = summary_data.get('data_highlights', [])
+                        
+                        print(f"✅ GLM Summary Complete:")
+                        print(f"   📝 Chat Summary: {len(chat_summary)} chars")
+                        print(f"   🔗 Links Extracted: {len(important_links)}")
+                        print(f"   🔑 Key Terms: {len(key_terms)}")
+                    else:
+                        chat_summary = content[:500]
+                        
+            except Exception as chat_error:
+                print(f"⚠️ Chat summary error (continuing anyway): {chat_error}")
+        
+        # ═══════════════════════════════════════════════════════════════
+        # Build ENHANCED research context with chat insights
+        # ═══════════════════════════════════════════════════════════════
         research_context = f"""
 # Research Topic: {query}
+
+## Chat Discussion Context
+{chat_summary}
+
+## Key Terms to Include
+{', '.join(key_terms) if key_terms else 'N/A'}
+
+## Important Links/References
+{chr(10).join(f"- {link}" for link in important_links[:10]) if important_links else 'No links extracted'}
 
 ## Executive Summary
 {executive_summary}
@@ -1629,11 +1727,11 @@ async def generate_slides_from_blog(
 ## Recommendations
 {chr(10).join(f"- {rec}" for rec in recommendations)}
 
-## Sources ({len(sources)} references)
-{chr(10).join(f"- [{s.get('title', 'Source')}]({s.get('url', '#')})" for s in sources[:10])}
+## Data Sources ({len(sources)} references)
+{chr(10).join(f"- [{s.get('title', 'Source')}]({s.get('url', '#')}) - {s.get('snippet', '')[:100]}" for s in sources[:15])}
 
-## Full Analysis
-{markdown_report[:5000]}
+## Detailed Analysis
+{markdown_report[:4000]}
 """
         
         # Use GLM7StepGenerator for slide generation
@@ -1650,12 +1748,43 @@ async def generate_slides_from_blog(
                     topic=query,
                     slide_count=request.slide_count,
                     style=request.style,
-                    research_context=research_context[:3000] if research_context else None
+                    research_context=research_context[:5000] if research_context else None
                 )
                 generator_used = "GLM-4.7 7-Step"
                 print(f"✅ Slide generation using GLM7StepGenerator")
+                
+                # 🔥 Inject important links and key terms into slides
+                if slide_result and slide_result.get('success'):
+                    slides = slide_result.get('slides', [])
+                    
+                    # Add links to reference slide if not exists
+                    has_reference_slide = any(s.get('type') == 'references' or 'reference' in s.get('title', '').lower() for s in slides)
+                    
+                    if important_links and not has_reference_slide:
+                        slides.append({
+                            "slide_number": len(slides) + 1,
+                            "type": "references",
+                            "title": "Important Links & References",
+                            "content": important_links[:8],
+                            "notes": "Key resources mentioned in the discussion"
+                        })
+                    
+                    # Ensure key terms are visible in slides
+                    if key_terms and len(slides) > 1:
+                        # Add key terms to second slide if it's content
+                        second_slide = slides[1] if len(slides) > 1 else None
+                        if second_slide and second_slide.get('type') == 'content':
+                            content = second_slide.get('content', [])
+                            if isinstance(content, list):
+                                content.append(f"🔑 Key Terms: {', '.join(key_terms[:5])}")
+                                second_slide['content'] = content
+                    
+                    slide_result['slides'] = slides
+                    
         except Exception as glm_error:
             print(f"⚠️ GLM slide generation failed: {glm_error}")
+            import traceback
+            print(traceback.format_exc())
         
         # Return if any generator succeeded
         if slide_result and slide_result.get('success'):
@@ -1665,12 +1794,15 @@ async def generate_slides_from_blog(
                 "slides": slide_result.get('slides', []),
                 "blog_id": blog_id,
                 "metadata": {
-                    "generated_from": "research_blog",
+                    "generated_from": "research_blog_with_chat_context",
                     "generator": generator_used,
                     "blog_query": query,
                     "slide_count": len(slide_result.get('slides', [])),
                     "style": request.style,
-                    "sources_used": len(sources)
+                    "sources_used": len(sources),
+                    "chat_summary_included": bool(chat_summary),
+                    "links_extracted": len(important_links),
+                    "key_terms_count": len(key_terms)
                 }
             }
         

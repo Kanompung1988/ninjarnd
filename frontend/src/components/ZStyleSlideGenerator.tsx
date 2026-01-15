@@ -299,51 +299,92 @@ export default function ZStyleSlideGenerator({
   // RENDER
   // =======================================================================
   return (
-    <div className="h-full flex flex-col">
-      {/* Header */}
-      <div className="p-4 border-b border-border bg-card">
-        <div className="flex items-center gap-2">
-          <Sparkles className="w-5 h-5 text-primary" />
-          <h2 className="text-lg font-semibold">Z-Style Slide Generator</h2>
-          <span className="text-sm text-muted-foreground">
-            {step === 'input' && '• Step 1: Enter Topic'}
-            {step === 'outline' && '• Step 2: Review Outline'}
-            {step === 'generating' && '• Step 3: Generating Slides'}
-            {step === 'complete' && '• ✅ Complete'}
-          </span>
+    <div className="h-full flex flex-col bg-gradient-to-br from-background via-background to-primary/5">
+      {/* Header - Enhanced */}
+      <div className="p-4 border-b border-border bg-card/80 backdrop-blur-sm">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="p-2 bg-primary/10 rounded-lg">
+              <Sparkles className="w-5 h-5 text-primary" />
+            </div>
+            <div>
+              <h2 className="text-lg font-semibold">🎨 AI Slide Generator</h2>
+              <p className="text-xs text-muted-foreground">
+                {step === 'input' && '📝 Step 1: Enter Topic & Preferences'}
+                {step === 'outline' && '📋 Step 2: Review & Customize Outline'}
+                {step === 'generating' && '⚡ Step 3: Generating Professional Slides...'}
+                {step === 'complete' && '✅ Presentation Ready!'}
+              </p>
+            </div>
+          </div>
+          {researchContext && (
+            <div className="flex items-center gap-2 px-3 py-1.5 bg-green-500/10 border border-green-500/20 rounded-full">
+              <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" />
+              <span className="text-xs font-medium text-green-600 dark:text-green-400">
+                Using Deep Research Data
+              </span>
+            </div>
+          )}
         </div>
       </div>
 
       {/* Main Content */}
       <div className="flex-1 overflow-hidden flex">
         
-        {/* ============= STEP 1: INPUT ============= */}
+        {/* ============= STEP 1: INPUT - Enhanced UI ============= */}
         {step === 'input' && (
           <div className="flex-1 p-6 overflow-auto">
             <div className="max-w-2xl mx-auto space-y-6">
-              <div className="bg-card border border-border rounded-lg p-6">
-                <h3 className="text-lg font-medium mb-4">Create Presentation</h3>
+              <div className="bg-card/50 backdrop-blur border border-border rounded-xl p-6 shadow-lg">
+                <div className="flex items-center gap-2 mb-4">
+                  <div className="p-2 bg-primary/10 rounded-lg">
+                    <Sparkles className="w-5 h-5 text-primary" />
+                  </div>
+                  <h3 className="text-lg font-semibold">Create Professional Presentation</h3>
+                </div>
+                
+                {researchContext && (
+                  <div className="mb-4 p-4 bg-blue-500/5 border border-blue-500/20 rounded-lg">
+                    <div className="flex items-start gap-3">
+                      <div className="p-1.5 bg-blue-500/10 rounded">
+                        <Sparkles className="w-4 h-4 text-blue-500" />
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-sm font-medium text-blue-600 dark:text-blue-400 mb-1">
+                          🔍 Enhanced with Deep Research
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          Your slides will include comprehensive analysis, verified sources, key findings, 
+                          and important links from the research session.
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                )}
                 
                 {/* Topic */}
                 <div className="mb-4">
-                  <label className="block text-sm font-medium mb-2">Topic</label>
+                  <label className="block text-sm font-medium mb-2 flex items-center gap-2">
+                    <span>Presentation Topic</span>
+                    <span className="text-red-500">*</span>
+                  </label>
                   <input
                     type="text"
                     value={topic}
                     onChange={(e) => setTopic(e.target.value)}
-                    placeholder="Enter presentation topic..."
-                    className="w-full px-4 py-3 rounded-lg border border-border bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent"
+                    placeholder="e.g., Machine Learning Basics, Climate Change Solutions..."
+                    className="w-full px-4 py-3 rounded-lg border-2 border-border bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-primary transition-all"
                   />
                 </div>
 
-                {/* Options Row */}
+                {/* Options Row - Enhanced */}
                 <div className="grid grid-cols-2 gap-4 mb-4">
                   <div>
-                    <label className="block text-sm font-medium mb-2">Number of Slides</label>
+                    <label className="block text-sm font-medium mb-2">📊 Number of Slides</label>
                     <select
                       value={slideCount}
                       onChange={(e) => setSlideCount(Number(e.target.value))}
-                      className="w-full px-4 py-2 rounded-lg border border-border bg-background text-foreground"
+                      className="w-full px-4 py-2.5 rounded-lg border-2 border-border bg-background text-foreground hover:border-primary transition-colors cursor-pointer"
                     >
                       {[5, 6, 7, 8, 9, 10, 12, 15].map(n => (
                         <option key={n} value={n}>{n} slides</option>
@@ -352,36 +393,45 @@ export default function ZStyleSlideGenerator({
                   </div>
                   
                   <div>
-                    <label className="block text-sm font-medium mb-2">Style</label>
+                    <label className="block text-sm font-medium mb-2">🎨 Presentation Style</label>
                     <select
                       value={style}
                       onChange={(e) => setStyle(e.target.value)}
-                      className="w-full px-4 py-2 rounded-lg border border-border bg-background text-foreground"
+                      className="w-full px-4 py-2.5 rounded-lg border-2 border-border bg-background text-foreground hover:border-primary transition-colors cursor-pointer"
                     >
-                      <option value="professional">Professional</option>
-                      <option value="creative">Creative</option>
-                      <option value="minimal">Minimal</option>
-                      <option value="bold">Bold</option>
+                      <option value="professional">💼 Professional</option>
+                      <option value="creative">🎭 Creative</option>
+                      <option value="minimal">✨ Minimal</option>
+                      <option value="bold">🔥 Bold</option>
                     </select>
                   </div>
                 </div>
 
-                {/* Image Generation Toggle */}
-                <div className="flex items-center gap-3 mb-6">
-                  <input
-                    type="checkbox"
-                    id="generateImages"
-                    checked={generateImages}
-                    onChange={(e) => setGenerateImages(e.target.checked)}
-                    className="w-4 h-4 rounded border-border text-primary focus:ring-primary"
-                  />
-                  <label htmlFor="generateImages" className="text-sm flex items-center gap-2">
-                    <ImageIcon className="w-4 h-4" />
-                    Generate AI images for slides (DALL-E 3)
-                  </label>
+                {/* Info Box */}
+                <div className="mb-6 p-4 bg-primary/5 border border-primary/10 rounded-lg">
+                  <div className="flex gap-3">
+                    <div className="mt-0.5">
+                      <div className="w-8 h-8 rounded-full bg-primary/10 flex items-center justify-center">
+                        <Sparkles className="w-4 h-4 text-primary" />
+                      </div>
+                    </div>
+                    <div className="flex-1">
+                      <h4 className="text-sm font-medium mb-1">✨ Powered by GLM-4.7</h4>
+                      <ul className="text-xs text-muted-foreground space-y-1">
+                        <li>• 7-step intelligent generation process</li>
+                        <li>• Professional design with modern layouts</li>
+                        <li>• Automatic content optimization</li>
+                        {researchContext && (
+                          <li className="text-green-600 dark:text-green-400 font-medium">
+                            • Enhanced with research data & chat context
+                          </li>
+                        )}
+                      </ul>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Generate Button */}
+                {/* Generate Button - Enhanced */}
                 <button
                   onClick={handleGenerateOutline}
                   disabled={isLoadingOutline || !topic.trim()}
